@@ -1,0 +1,95 @@
+#include <ESP8266WiFi.h> // Include for WiFi
+#include <Servo.h>       // Include if servo motor is used
+
+#define TRIG_PIN D1       // Trigger pin for Ultrasonic sensor
+#define ECHO_PIN D2       // Echo pin for Ultrasonic sensor
+#define SERVO_PIN D3      // Servo pin (optional)
+#define MAX_DISTANCE 30   // Max bin height in cm
+
+// WiFi Credentials
+const char* ssid = "Your_SSID";
+const char* password = "Your_PASSWORD";
+
+// ThingSpeak API
+const char* server = "api.thingspeak.com";
+String apiKey = "Your_API_Key";
+
+// Create servo instance
+Servo binLid;
+
+void setup() {
+  Serial.begin(115200); // Start Serial monitor
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  binLid.attach(SERVO_PIN); // Attach servo
+  binLid.write(0);          // Close lid
+
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi");
+}
+
+void loop() {
+  // Measure distance
+  long distance = getDistance();
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.println(" cm");
+
+  // Send data to cloud
+  sendToCloud(distance);
+
+  // Lid control (optional)
+  if (distance < 5) { // Bin is nearly full
+    binLid.write(90); // Open lid
+  } else {
+    binLid.write(0);  // Close lid
+  }
+
+  delay(15000); // 15 seconds delay
+}
+
+// Function to measure distance
+long getDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  long duration = pulseIn(ECHO_PIN, HIGH);
+  long distance = duration * 0.034 / 2;
+  return distance;
+}
+
+// Function to send data to cloud
+void sendToCloud(long distance) {
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClient client;
+    if (client.connect(server, 80)) {
+      String postStr = apiKey;
+      postStr += "&field1=";
+      postStr += String(distance);
+      postStr += "\r\n\r\n";
+
+      client.print("POST /update HTTP/1.1\n");
+      client.print("Host: " + String(server) + "\n");
+      client.print("Connection: close\n");
+      client.print("X-THINGSPEAKAPIKEY: " + apiKey + "\n");
+      client.print("Content-Type: application/x-www-form-urlencoded\n");
+      client.print("Content-Length: ");
+      client.print(postStr.length());
+      client.print("\n\n");
+      client.print(postStr);
+
+      Serial.println("Data sent to ThingSpeak");
+    }
+    client.stop();
+  } else {
+    Serial.println("WiFi not connected");
+  }
+}
